@@ -195,13 +195,13 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
         self.buffer_offset.unwrap_or(0) + self.internal_buffer_position
     }
 
-    fn private_read(&mut self, internal_buffer_start: usize) -> Result<bool, TagIteratorError> {
+    fn private_read(&mut self, internal_buffer_start: usize) -> Result<usize, TagIteratorError> {
         let bytes_read = self.source.read(&mut self.buffer[internal_buffer_start..]).map_err(|source| TagIteratorError::ReadError { source })?;
         if bytes_read == 0 {
-            Ok(false)
+            Ok(bytes_read)
         } else {
             self.buffered_byte_length += bytes_read;
-            Ok(true)
+            Ok(bytes_read)
         }
     }
 
@@ -219,22 +219,25 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
         }
 
         if self.buffer_offset.is_none() {
-            if !self.private_read(0)? {
-                return Ok(false);
-            }
+            let bytes_read = self.private_read(0)?;
             self.buffer_offset = Some(0);
             self.internal_buffer_position = 0;
+            if bytes_read < length {
+                return Err(TagIteratorError::ReadError { source: std::io::Error::new(std::io::ErrorKind::Other, "Could not read enough bytes") })
+            }
         } else {
             while self.internal_buffer_position + length > self.buffered_byte_length {
                 self.buffer.copy_within(self.internal_buffer_position..self.buffered_byte_length, 0);
                 self.buffered_byte_length -= self.internal_buffer_position;
                 self.buffer_offset = Some(self.current_offset());
                 self.internal_buffer_position = 0;
-                if !self.private_read(self.buffered_byte_length)? {
-                    return Ok(false);
+                let bytes_read = self.private_read(self.buffered_byte_length)?;
+                if bytes_read < length {
+                    return Err(TagIteratorError::ReadError { source: std::io::Error::new(std::io::ErrorKind::Other, "Could not read enough bytes") })
                 }
             }
         }
+        
         Ok(true)
     }
 
