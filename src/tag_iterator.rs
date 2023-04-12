@@ -1,4 +1,4 @@
-use std::io::Read;
+use std::io::{Read, ErrorKind};
 use std::collections::{HashSet, VecDeque};
 
 use crate::spec_util::validate_tag_path;
@@ -227,10 +227,6 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
             }
         } else {
             while self.internal_buffer_position + length > self.buffered_byte_length {
-                self.buffer.copy_within(self.internal_buffer_position..self.buffered_byte_length, 0);
-                self.buffered_byte_length -= self.internal_buffer_position;
-                self.buffer_offset = Some(self.current_offset());
-                self.internal_buffer_position = 0;
                 let bytes_read = self.private_read(self.buffered_byte_length)?;
                 if bytes_read < length {
                     return Err(TagIteratorError::ReadError { source: std::io::Error::new(std::io::ErrorKind::Other, "Could not read enough bytes") })
@@ -333,6 +329,7 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
 
     fn read_tag(&mut self) -> Result<ProcessingTag<TSpec>, TagIteratorError> {
         let tag_start = self.current_offset();
+        // println!("Attempting to read tag starting at offset {}", tag_start);
 
         let (tag_id, spec_tag_type, size) = self.read_valid_tag_header()?;
 
@@ -409,6 +406,9 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
             self.emission_queue.extend(self.tag_stack.drain(index..).map(|t| Ok((t.tag, t.tag_start))).rev());
         }
 
+        // store buffer position
+        let internal_buffer_position_before = self.internal_buffer_position;
+        
         if let Some(next_read) = self.read_tag_checked() {
             if let Ok(next_tag) = &next_read {
                 while matches!(self.tag_stack.last(), Some(open_tag) if open_tag.size == Unknown) {
@@ -437,6 +437,23 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
                         self.buffer_master(tag_id);
                         return;
                     }
+                }
+
+                // shrink buffer only when it successfully reads
+                self.buffer.copy_within(self.internal_buffer_position..self.buffered_byte_length, 0);
+                self.buffered_byte_length -= self.internal_buffer_position;
+                self.buffer_offset = Some(self.current_offset());
+                self.internal_buffer_position = 0;
+            }
+            else if let Err(e) = &next_read {
+                match e {
+                    TagIteratorError::ReadError { source } => {
+                        if source.kind() == ErrorKind::Other {
+                            // reset buffer position if there was an error, so it can try again on the next iteration
+                            self.internal_buffer_position = internal_buffer_position_before;
+                        }
+                    },
+                    _ => {}
                 }
             }
 
