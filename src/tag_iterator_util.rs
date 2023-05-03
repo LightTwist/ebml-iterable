@@ -67,7 +67,7 @@ impl<TSpec> ProcessingTag<TSpec> where TSpec: EbmlSpecification<TSpec> + EbmlTag
     }
 }
 
-pub const DEFAULT_BUFFER_LEN: usize = 1024 * 64;
+pub const DEFAULT_BUFFER_LEN: usize = 1024 * 8192; // 8 MiB
 
 ///
 /// Used to relax rules on how strictly a [`TagIterator`](crate::TagIterator) should validate the read stream.
